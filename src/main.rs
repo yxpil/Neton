@@ -2,6 +2,7 @@
 //! print JSON on stdout, errors on stderr.
 
 use std::io::{IsTerminal, Read};
+use std::net::IpAddr;
 use std::process::ExitCode;
 
 use anyhow::{bail, Context, Result};
@@ -12,6 +13,7 @@ use serde_json::Value;
 use neton::actions;
 use neton::cli::{Cli, Command, MergeStdin};
 use neton::dispatch;
+use neton::scan;
 use neton::serve;
 
 fn main() -> ExitCode {
@@ -23,7 +25,12 @@ fn main() -> ExitCode {
         Ok(None) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("neton: {err:#}");
-            ExitCode::FAILURE
+            // Missing scan authorization is a usage problem, not a crash.
+            if err.downcast_ref::<scan::PermissionRequired>().is_some() {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }
@@ -66,6 +73,7 @@ fn require<'a>(value: &'a Option<String>, field: &str, action: &str) -> Result<&
 fn run() -> Result<Option<String>> {
     let cli = Cli::parse();
     let stdin = read_stdin_object()?;
+    let scan_allowed = cli.yes_i_have_permission || scan::permission_via_env();
 
     match cli.command {
         Some(Command::Info) => emit(&actions::info()?, cli.pretty),
@@ -133,11 +141,67 @@ fn run() -> Result<Option<String>> {
             }
             let host = args.host.unwrap_or_else(|| "127.0.0.1".into());
             let port = args.port.unwrap_or(serve::DEFAULT_PORT);
-            serve::run_blocking(&host, port, args.token)?;
+            let serve_scan_authorized = args.yes_i_have_permission || scan::permission_via_env();
+            serve::run_blocking(&host, port, args.token, serve_scan_authorized)?;
             Ok(None)
         }
+        Some(Command::Arp) => emit(&neton::arp::read_arp_table()?, cli.pretty),
+        Some(Command::NetScan(mut args)) => {
+            if let Some(value) = &stdin {
+                args.merge_stdin(value)?;
+            }
+            scan::ensure_scan_permission("netscan", scan_allowed)?;
+            let cidr = require(&args.cidr, "cidr", "netscan")?.to_string();
+            let ports = parse_ports_or_default(args.ports.as_deref(), scan::DEFAULT_NETSCAN_PORTS.to_vec())?;
+            let concurrency = args.concurrency.unwrap_or(scan::DEFAULT_NETSCAN_CONCURRENCY as usize);
+            let timeout_ms = args.timeout_ms.unwrap_or(scan::DEFAULT_NETSCAN_TIMEOUT_MS);
+            emit(
+                &scan::netscan(&cidr, &ports, concurrency, timeout_ms, !args.no_rdns)?,
+                cli.pretty,
+            )
+        }
+        Some(Command::PortScan(mut args)) => {
+            if let Some(value) = &stdin {
+                args.merge_stdin(value)?;
+            }
+            scan::ensure_scan_permission("portscan", scan_allowed)?;
+            let target = require(&args.target, "target", "portscan")?.to_string();
+            let ports = parse_ports_or_default(args.ports.as_deref(), scan::COMMON_PORTS.to_vec())?;
+            let concurrency = args
+                .concurrency
+                .unwrap_or(scan::DEFAULT_PORTSCAN_CONCURRENCY as usize);
+            let timeout_ms = args.timeout_ms.unwrap_or(scan::DEFAULT_PORTSCAN_TIMEOUT_MS);
+            emit(&scan::portscan(&target, &ports, concurrency, timeout_ms)?, cli.pretty)
+        }
+        Some(Command::Device(mut args)) => {
+            if let Some(value) = &stdin {
+                args.merge_stdin(value)?;
+            }
+            scan::ensure_scan_permission("device", scan_allowed)?;
+            let ip: IpAddr = require(&args.ip, "ip", "device")?
+                .parse()
+                .context("'ip' must be an IPv4 or IPv6 address")?;
+            let ports = match args.ports.as_deref() {
+                Some(spec) => Some(scan::parse_port_spec(spec)?),
+                None => None,
+            };
+            let timeout_ms = args.timeout_ms.unwrap_or(neton::device::DEFAULT_DEVICE_TIMEOUT_MS);
+            let http_max = args.http_max.unwrap_or(neton::device::DEFAULT_HTTP_MAX);
+            emit(
+                &neton::device::analyze(ip, ports.as_deref(), timeout_ms, http_max, !args.no_rdns)?,
+                cli.pretty,
+            )
+        }
         None => match stdin {
-            Some(value) => emit(&dispatch::dispatch_or_fail(&value)?, cli.pretty),
+            Some(value) => {
+                match dispatch::dispatch_with(&value, scan_allowed) {
+                    Ok(out) => emit(&out, cli.pretty),
+                    Err(dispatch::DispatchError::PermissionRequired(action)) => Err(anyhow::Error::new(
+                        scan::PermissionRequired { action },
+                    )),
+                    Err(err) => Err(anyhow::anyhow!("{err}")),
+                }
+            }
             None => {
                 Cli::command()
                     .print_help()
@@ -145,5 +209,13 @@ fn run() -> Result<Option<String>> {
                 Ok(None)
             }
         },
+    }
+}
+
+/// Parse a port spec, or fall back to the action's default port set.
+fn parse_ports_or_default(spec: Option<&str>, default: Vec<u16>) -> Result<Vec<u16>> {
+    match spec {
+        Some(spec) => scan::parse_port_spec(spec),
+        None => Ok(default),
     }
 }

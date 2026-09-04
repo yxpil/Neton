@@ -5,7 +5,12 @@
 //! emit the exact same JSON shapes.
 
 pub mod actions;
+pub mod arp;
 pub mod cli;
+pub mod device;
 pub mod dispatch;
+pub mod dns_ptr;
 pub mod models;
+pub mod oui;
+pub mod scan;
 pub mod serve;

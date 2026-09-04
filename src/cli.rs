@@ -15,7 +15,7 @@ use serde_json::Value;
     name = "neton",
     version,
     about = "Structured local network observation and diagnostics for AI agents (JSON in, JSON out)",
-    after_help = "All data is emitted as JSON on stdout; logs and errors go to stderr.\nWhen stdin is piped, a JSON object is read and merged over the arguments (stdin wins)."
+    after_help = "All data is emitted as JSON on stdout; logs and errors go to stderr.\nWhen stdin is piped, a JSON object is read and merged over the arguments (stdin wins).\n\nScan actions (netscan / portscan / device) require explicit authorization:\npass --yes-i-have-permission or set NETON_I_HAVE_PERMISSION=yes — only scan\nnetworks you own or are authorized to test."
 )]
 pub struct Cli {
     /// Emit JSON (this is the default; the flag is kept for explicitness).
@@ -24,6 +24,9 @@ pub struct Cli {
     /// Pretty-print the JSON output with indentation.
     #[arg(long, global = true)]
     pub pretty: bool,
+    /// Acknowledge you are authorized to run network scans on the target.
+    #[arg(long, global = true)]
+    pub yes_i_have_permission: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -44,6 +47,16 @@ pub enum Command {
     Probe(ProbeArgs),
     /// HTTP request summary (status, timing, redacted headers, body preview)
     Http(HttpArgs),
+    /// System ARP / neighbor table with vendor lookup (no root required)
+    Arp,
+    /// Discover live devices in a subnet (TCP sweep + ARP correlation) [scan]
+    #[command(name = "netscan")]
+    NetScan(NetScanArgs),
+    /// TCP connect port scan of one target [scan]
+    #[command(name = "portscan")]
+    PortScan(PortScanArgs),
+    /// Analyze one LAN device: hostname, MAC vendor, ports, HTTP fingerprint [scan]
+    Device(DeviceArgs),
     /// Run the BIT Remote HTTP API server
     Serve(ServeArgs),
 }
@@ -121,6 +134,66 @@ pub struct ServeArgs {
     /// Require "Authorization: Bearer <token>" on all endpoints except /health
     #[arg(long, value_name = "TOKEN")]
     pub token: Option<String>,
+    /// Authorize scan actions (netscan / portscan / device) over /invoke
+    #[arg(long)]
+    pub yes_i_have_permission: bool,
+}
+
+/// Arguments of `neton netscan`.
+#[derive(Args, Debug, Default, Deserialize)]
+pub struct NetScanArgs {
+    /// IPv4 CIDR to scan, e.g. "192.168.1.0/24"
+    #[arg(value_name = "CIDR")]
+    pub cidr: Option<String>,
+    /// Comma-separated discovery ports (default "22,80,443,445,3389,8080")
+    #[arg(long, value_name = "PORTS")]
+    pub ports: Option<String>,
+    /// Maximum concurrent probes (default 128)
+    #[arg(long, value_name = "N")]
+    pub concurrency: Option<usize>,
+    /// Connect timeout in milliseconds (default 400)
+    #[arg(long, value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+    /// Skip reverse-DNS hostname lookups
+    #[arg(long)]
+    pub no_rdns: bool,
+}
+
+/// Arguments of `neton portscan`.
+#[derive(Args, Debug, Default, Deserialize)]
+pub struct PortScanArgs {
+    /// Target IP or hostname
+    #[arg(value_name = "TARGET")]
+    pub target: Option<String>,
+    /// Ports to scan: "common" (default), a list "80,443", or a range "1-1024"
+    #[arg(long, value_name = "PORTS")]
+    pub ports: Option<String>,
+    /// Maximum concurrent probes (default 200)
+    #[arg(long, value_name = "N")]
+    pub concurrency: Option<usize>,
+    /// Connect timeout in milliseconds (default 800)
+    #[arg(long, value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+}
+
+/// Arguments of `neton device`.
+#[derive(Args, Debug, Default, Deserialize)]
+pub struct DeviceArgs {
+    /// Device IP address
+    #[arg(value_name = "IP")]
+    pub ip: Option<String>,
+    /// Ports to probe: "common" (default), a list, or a range
+    #[arg(long, value_name = "PORTS")]
+    pub ports: Option<String>,
+    /// Connect timeout in milliseconds (default 1000)
+    #[arg(long, value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+    /// Maximum number of HTTP(S) fingerprint probes (default 2, max 4)
+    #[arg(long, value_name = "N")]
+    pub http_max: Option<usize>,
+    /// Skip reverse-DNS hostname lookups
+    #[arg(long)]
+    pub no_rdns: bool,
 }
 
 /// Merge piped-stdin JSON over parsed CLI arguments (stdin wins).
@@ -232,6 +305,69 @@ impl MergeStdin for ServeArgs {
         }
         if let Some(token) = take(value, "token")? {
             self.token = Some(token);
+        }
+        if let Some(flag) = take(value, "yes_i_have_permission")? {
+            self.yes_i_have_permission = flag;
+        }
+        Ok(())
+    }
+}
+
+impl MergeStdin for NetScanArgs {
+    fn merge_stdin(&mut self, value: &Value) -> Result<()> {
+        if let Some(cidr) = take(value, "cidr")? {
+            self.cidr = Some(cidr);
+        }
+        if let Some(ports) = take(value, "ports")? {
+            self.ports = Some(ports);
+        }
+        if let Some(concurrency) = take(value, "concurrency")? {
+            self.concurrency = Some(concurrency);
+        }
+        if let Some(timeout_ms) = take(value, "timeout_ms")? {
+            self.timeout_ms = Some(timeout_ms);
+        }
+        if let Some(no_rdns) = take(value, "no_rdns")? {
+            self.no_rdns = no_rdns;
+        }
+        Ok(())
+    }
+}
+
+impl MergeStdin for PortScanArgs {
+    fn merge_stdin(&mut self, value: &Value) -> Result<()> {
+        if let Some(target) = take(value, "target")? {
+            self.target = Some(target);
+        }
+        if let Some(ports) = take(value, "ports")? {
+            self.ports = Some(ports);
+        }
+        if let Some(concurrency) = take(value, "concurrency")? {
+            self.concurrency = Some(concurrency);
+        }
+        if let Some(timeout_ms) = take(value, "timeout_ms")? {
+            self.timeout_ms = Some(timeout_ms);
+        }
+        Ok(())
+    }
+}
+
+impl MergeStdin for DeviceArgs {
+    fn merge_stdin(&mut self, value: &Value) -> Result<()> {
+        if let Some(ip) = take(value, "ip")? {
+            self.ip = Some(ip);
+        }
+        if let Some(ports) = take(value, "ports")? {
+            self.ports = Some(ports);
+        }
+        if let Some(timeout_ms) = take(value, "timeout_ms")? {
+            self.timeout_ms = Some(timeout_ms);
+        }
+        if let Some(http_max) = take(value, "http_max")? {
+            self.http_max = Some(http_max);
+        }
+        if let Some(no_rdns) = take(value, "no_rdns")? {
+            self.no_rdns = no_rdns;
         }
         Ok(())
     }

@@ -33,7 +33,10 @@ pub const DEFAULT_HTTP_BODY_MAX: usize = 500;
 pub const DEFAULT_PROBE_CONCURRENCY: usize = 32;
 
 /// Actions exposed by `serve` (`POST /invoke`) and bare `neton` stdin mode.
-pub const ACTIONS: [&str; 7] = [
+/// The last four are network scans and require the explicit authorization
+/// acknowledgement (`--yes-i-have-permission` / `NETON_I_HAVE_PERMISSION=yes`;
+/// over HTTP the server itself must be started with that acknowledgement).
+pub const ACTIONS: [&str; 11] = [
     "info",
     "interfaces",
     "ports",
@@ -41,6 +44,10 @@ pub const ACTIONS: [&str; 7] = [
     "ping",
     "probe",
     "http",
+    "arp",
+    "netscan",
+    "portscan",
+    "device",
 ];
 
 /// Hard upper bound for probe concurrency.

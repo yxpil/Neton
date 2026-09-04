@@ -6,7 +6,8 @@ use std::sync::mpsc;
 use serde_json::{json, Value};
 
 /// Spawn `neton serve` on a random port inside a dedicated runtime thread.
-fn spawn_server(token: Option<String>) -> SocketAddr {
+/// `scan_authorized` mirrors the `--yes-i-have-permission` server flag.
+fn spawn_server(token: Option<String>, scan_authorized: bool) -> SocketAddr {
     let (tx, rx) = mpsc::channel::<SocketAddr>();
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -19,7 +20,7 @@ fn spawn_server(token: Option<String>) -> SocketAddr {
                 .expect("bind");
             let addr = listener.local_addr().expect("addr");
             tx.send(addr).expect("send addr");
-            axum::serve(listener, neton::serve::router(token))
+            axum::serve(listener, neton::serve::router(token, scan_authorized))
                 .await
                 .expect("serve");
         });
@@ -66,7 +67,7 @@ fn get(url: &str, token: Option<&str>) -> (u16, Value) {
 
 #[test]
 fn health_returns_ok() {
-    let addr = spawn_server(None);
+    let addr = spawn_server(None, false);
     let (status, body) = get(&format!("http://{addr}/health"), None);
     assert_eq!(status, 200);
     assert_eq!(body["ok"], json!(true));
@@ -74,7 +75,7 @@ fn health_returns_ok() {
 
 #[test]
 fn invoke_actions_lists_all_actions() {
-    let addr = spawn_server(None);
+    let addr = spawn_server(None, false);
     let (status, body) = get(&format!("http://{addr}/invoke-actions"), None);
     assert_eq!(status, 200);
     let actions = body["actions"].as_array().expect("actions array");
@@ -87,15 +88,19 @@ fn invoke_actions_lists_all_actions() {
         "ping",
         "probe",
         "http",
+        "arp",
+        "netscan",
+        "portscan",
+        "device",
     ] {
         assert!(names.contains(&expected), "missing action '{expected}'");
     }
-    assert_eq!(names.len(), 7);
+    assert_eq!(names.len(), 11);
 }
 
 #[test]
 fn invoke_ping_against_local_listener() {
-    let addr = spawn_server(None);
+    let addr = spawn_server(None, false);
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     let (status, body) = post_json(
@@ -116,7 +121,7 @@ fn invoke_ping_against_local_listener() {
 
 #[test]
 fn invoke_info_and_interfaces_return_data() {
-    let addr = spawn_server(None);
+    let addr = spawn_server(None, false);
     let (status, body) = post_json(
         &format!("http://{addr}/invoke"),
         json!({ "params": { "action": "info" } }),
@@ -136,7 +141,7 @@ fn invoke_info_and_interfaces_return_data() {
 
 #[test]
 fn invoke_unknown_action_is_400() {
-    let addr = spawn_server(None);
+    let addr = spawn_server(None, false);
     let (status, body) = post_json(
         &format!("http://{addr}/invoke"),
         json!({ "params": { "action": "nope" } }),
@@ -151,7 +156,7 @@ fn invoke_unknown_action_is_400() {
 
 #[test]
 fn invoke_without_params_or_action_is_400() {
-    let addr = spawn_server(None);
+    let addr = spawn_server(None, false);
     let (status, body) = post_json(&format!("http://{addr}/invoke"), json!({}), None);
     assert_eq!(status, 400);
     assert!(body["error"].is_string());
@@ -173,7 +178,7 @@ fn invoke_without_params_or_action_is_400() {
 
 #[test]
 fn token_protects_everything_except_health() {
-    let addr = spawn_server(Some("s3cret".into()));
+    let addr = spawn_server(Some("s3cret".into()), false);
     let base = format!("http://{addr}");
 
     // /health stays open.
@@ -209,4 +214,77 @@ fn token_protects_everything_except_health() {
     );
     assert_eq!(status, 200);
     assert!(body["arch"].is_string());
+}
+
+#[test]
+fn scan_action_is_403_without_authorization() {
+    let addr = spawn_server(None, false);
+    let (status, body) = post_json(
+        &format!("http://{addr}/invoke"),
+        json!({ "params": { "action": "portscan", "target": "127.0.0.1", "ports": "1" } }),
+        None,
+    );
+    assert_eq!(status, 403, "unauthorized scans must be rejected");
+    let error = body["error"].as_str().expect("error message");
+    assert!(error.contains("yes-i-have-permission"), "error: {error}");
+    assert_eq!(body["ok"], json!(false));
+}
+
+#[test]
+fn scan_action_works_on_authorized_server() {
+    let addr = spawn_server(None, true);
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+
+    // Portscan against the local listener.
+    let (status, body) = post_json(
+        &format!("http://{addr}/invoke"),
+        json!({
+            "tool_id": "neton-remote",
+            "tool": "neton_remote",
+            "invoked_by": "test",
+            "params": {
+                "action": "portscan",
+                "target": "127.0.0.1",
+                "ports": port.to_string(),
+                "timeout_ms": 500
+            }
+        }),
+        None,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(body["open_count"], 1);
+    assert_eq!(body["open"][0]["port"], port as u64);
+
+    // Device analysis of the loopback host.
+    let (status, body) = post_json(
+        &format!("http://{addr}/invoke"),
+        json!({
+            "params": {
+                "action": "device",
+                "ip": "127.0.0.1",
+                "ports": port.to_string(),
+                "timeout_ms": 500,
+                "http_max": 0,
+                "no_rdns": true
+            }
+        }),
+        None,
+    );
+    assert_eq!(status, 200);
+    assert_eq!(body["ip"], "127.0.0.1");
+    assert_eq!(body["open_ports"][0]["port"], port as u64);
+    assert!(body["guess"].is_string());
+}
+
+#[test]
+fn scan_action_with_bad_params_is_400_even_when_authorized() {
+    let addr = spawn_server(None, true);
+    let (status, body) = post_json(
+        &format!("http://{addr}/invoke"),
+        json!({ "params": { "action": "netscan", "cidr": "192.168.1.0/24", "ports": "not-a-port" } }),
+        None,
+    );
+    assert_eq!(status, 400);
+    assert!(body["error"].is_string());
 }

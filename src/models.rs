@@ -146,6 +146,144 @@ pub struct HttpResult {
     pub error: Option<String>,
 }
 
+/// One ARP / neighbor-table row as reported by `neton arp`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArpEntry {
+    /// Neighbor IP address.
+    pub ip: IpAddr,
+    /// MAC address normalized to lowercase colon form, e.g.
+    /// `a4:2b:8c:11:22:33`; `null` for incomplete entries.
+    pub mac: Option<String>,
+    /// Vendor guessed from the embedded OUI table; `null` when unknown.
+    pub vendor: Option<String>,
+    /// Interface the neighbor was learned on, e.g. `en0`; platform-dependent.
+    pub interface: Option<String>,
+    /// Neighbor state as reported by the OS, e.g. `REACHABLE`, `incomplete`,
+    /// `dynamic`; `null` when the platform does not report one.
+    pub state: Option<String>,
+}
+
+/// One discovered device inside a `neton netscan` run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Device {
+    /// Device IP address.
+    pub ip: IpAddr,
+    /// MAC address from the ARP table; `null` when not (yet) learned.
+    pub mac: Option<String>,
+    /// Vendor from the embedded OUI table; `null` when unknown.
+    pub vendor: Option<String>,
+    /// Hostname via best-effort reverse DNS (PTR); `null` when unavailable.
+    pub hostname: Option<String>,
+    /// Ports that answered during the discovery sweep.
+    pub open_ports: Vec<OpenPort>,
+    /// How the device was discovered: a subset of `tcp` (answered the sweep)
+    /// and `arp` (present in the ARP table).
+    pub via: Vec<String>,
+}
+
+/// One open TCP port with its guessed service name.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenPort {
+    /// Port number.
+    pub port: u16,
+    /// Well-known service name (`http`, `ssh`, …); `null` when unknown.
+    pub service: Option<String>,
+    /// Connect time in milliseconds.
+    pub elapsed_ms: u64,
+}
+
+/// Result of `neton netscan <CIDR>`: subnet host discovery.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetScanResult {
+    /// The scanned range, normalized to `network/prefix`.
+    pub cidr: String,
+    /// Number of host addresses inside the range.
+    pub hosts_total: usize,
+    /// Discovery ports that were probed.
+    pub ports_probed: Vec<u16>,
+    /// Concurrency actually used.
+    pub concurrency: usize,
+    /// Connect timeout in milliseconds.
+    pub timeout_ms: u64,
+    /// Number of discovered devices.
+    pub devices_found: usize,
+    /// Discovered devices sorted by IP.
+    pub devices: Vec<Device>,
+    /// Total rows visible in the system ARP table (any range, diagnostics).
+    pub arp_entries_seen: usize,
+    /// Total scan duration in milliseconds.
+    pub elapsed_ms: u64,
+}
+
+/// Result of `neton portscan <TARGET>`: TCP connect scan of one host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortScanResult {
+    /// Target as given (IP or hostname).
+    pub target: String,
+    /// Address actually scanned.
+    pub ip: IpAddr,
+    /// Number of ports probed.
+    pub ports_scanned: usize,
+    /// Number of ports that answered.
+    pub open_count: usize,
+    /// Open ports sorted ascending, with guessed service names.
+    pub open: Vec<OpenPort>,
+    /// Total scan duration in milliseconds.
+    pub elapsed_ms: u64,
+}
+
+/// One HTTP fingerprint observation of a device management page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpProbe {
+    /// Probed URL.
+    pub url: String,
+    /// HTTP status code.
+    pub status: u16,
+    /// `Server` response header; `null` when absent.
+    pub server: Option<String>,
+    /// `X-Powered-By` / `X-Generator` header; `null` when absent.
+    pub powered_by: Option<String>,
+    /// Page `<title>` (whitespace-collapsed); `null` when none.
+    pub title: Option<String>,
+}
+
+/// One open port inside a `neton device` report.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceReportPort {
+    /// Port number.
+    pub port: u16,
+    /// Well-known service name; `null` when unknown.
+    pub service: Option<String>,
+    /// Connect time in milliseconds.
+    pub elapsed_ms: u64,
+}
+
+/// Result of `neton device <IP>`: analysis of a single LAN device.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceReport {
+    /// Device IP address.
+    pub ip: IpAddr,
+    /// Hostname via best-effort reverse DNS (PTR); `null` when unavailable.
+    pub hostname: Option<String>,
+    /// MAC address from the ARP table; `null` when not (yet) learned.
+    pub mac: Option<String>,
+    /// Vendor from the embedded OUI table; `null` when unknown.
+    pub vendor: Option<String>,
+    /// Interface the neighbor was learned on; platform-dependent.
+    pub interface: Option<String>,
+    /// Neighbor state as reported by the OS; `null` when unknown.
+    pub arp_state: Option<String>,
+    /// Open ports found by the common-port probe.
+    pub open_ports: Vec<DeviceReportPort>,
+    /// HTTP(S) fingerprints of the device's management pages.
+    pub http: Vec<HttpProbe>,
+    /// Informational device-type guess derived from vendor, ports and page
+    /// titles — never a certainty.
+    pub guess: String,
+    /// Total analysis duration in milliseconds.
+    pub elapsed_ms: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

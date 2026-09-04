@@ -26,34 +26,51 @@ pub const DEFAULT_PORT: u16 = 8753;
 #[derive(Clone)]
 struct AppState {
     token: Option<Arc<String>>,
+    /// When false, scan actions (`netscan` / `portscan` / `device`) answer
+    /// HTTP 403 — the server must be started with the explicit acknowledgement.
+    scan_authorized: bool,
 }
 
 /// Build the HTTP router (exposed for tests and embedding).
-pub fn router(token: Option<String>) -> Router {
+pub fn router(token: Option<String>, scan_authorized: bool) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/invoke-actions", get(invoke_actions))
         .route("/invoke", post(invoke))
         .with_state(AppState {
             token: token.map(Arc::new),
+            scan_authorized,
         })
 }
 
 /// Bind `host:port` and serve until the process is stopped.
-pub async fn run(host: &str, port: u16, token: Option<String>) -> Result<()> {
+pub async fn run(host: &str, port: u16, token: Option<String>, scan_authorized: bool) -> Result<()> {
     let listener = tokio::net::TcpListener::bind((host, port)).await?;
     let addr = listener.local_addr()?;
     eprintln!("neton serve listening on http://{addr} (GET /health, POST /invoke)");
-    axum::serve(listener, router(token)).await?;
+    eprintln!(
+        "scan actions (netscan/portscan/device): {}",
+        if scan_authorized {
+            "enabled"
+        } else {
+            "disabled (start with --yes-i-have-permission to allow)"
+        }
+    );
+    axum::serve(listener, router(token, scan_authorized)).await?;
     Ok(())
 }
 
 /// Blocking wrapper for the synchronous CLI entry point.
-pub fn run_blocking(host: &str, port: u16, token: Option<String>) -> Result<()> {
+pub fn run_blocking(
+    host: &str,
+    port: u16,
+    token: Option<String>,
+    scan_authorized: bool,
+) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(run(host, port, token))
+    runtime.block_on(run(host, port, token, scan_authorized))
 }
 
 async fn health() -> Json<Value> {
@@ -88,13 +105,18 @@ async fn invoke(
     let Some(params) = body.params else {
         return bad_request("missing 'params' object");
     };
-    match dispatch::dispatch(&params) {
+    match dispatch::dispatch_with(&params, state.scan_authorized) {
         Ok(value) => Json(value).into_response(),
         Err(DispatchError::UnknownAction(action)) => bad_request(format!(
             "unknown action '{action}' (available: {})",
             actions::ACTIONS.join(", ")
         )),
         Err(DispatchError::BadParams(message)) => bad_request(message),
+        Err(err @ DispatchError::PermissionRequired(_)) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "ok": false, "error": err.to_string() })),
+        )
+            .into_response(),
         Err(DispatchError::Failure(err)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "ok": false, "error": format!("{err:#}") })),

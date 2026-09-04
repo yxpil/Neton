@@ -58,12 +58,20 @@ fn help_exits_zero_and_lists_all_subcommands() {
         "ping",
         "probe",
         "http",
+        "arp",
+        "netscan",
+        "portscan",
+        "device",
         "serve",
     ] {
         assert!(result.stdout.contains(name), "help should mention '{name}'");
     }
     assert!(result.stdout.contains("--json"));
     assert!(result.stdout.contains("--pretty"));
+    assert!(
+        result.stdout.contains("--yes-i-have-permission"),
+        "help must document the scan authorization flag"
+    );
 }
 
 #[test]
@@ -331,4 +339,176 @@ fn http_reports_status_body_and_redacts_set_cookie() {
         !value.to_string().contains("super-secret"),
         "cookie value must never leak into the output"
     );
+}
+
+// ------------------------------------------------------------ arp / scans ----
+
+#[test]
+fn arp_outputs_entry_array_with_vendor_field() {
+    let result = run(&["arp"], None);
+    assert_eq!(result.status, 0, "stderr: {}", result.stderr);
+    let value = parse(&result);
+    let entries = value.as_array().expect("arp must be an array");
+    for entry in entries {
+        assert!(entry["ip"].is_string());
+        assert!(entry["mac"].is_string() || entry["mac"].is_null());
+        assert!(entry["vendor"].is_string() || entry["vendor"].is_null());
+        assert!(entry["interface"].is_string() || entry["interface"].is_null());
+        assert!(entry["state"].is_string() || entry["state"].is_null());
+    }
+}
+
+#[test]
+fn scan_commands_require_explicit_authorization() {
+    for (name, args) in [
+        ("netscan", vec!["netscan", "127.0.0.0/30"]),
+        ("portscan", vec!["portscan", "127.0.0.1", "--ports", "1"]),
+        ("device", vec!["device", "127.0.0.1"]),
+    ] {
+        let result = run(&args, None);
+        assert_eq!(result.status, 2, "{name} without permission must exit 2");
+        assert!(result.stderr.contains("--yes-i-have-permission"));
+        assert!(
+            result.stdout.trim().is_empty(),
+            "{name} must not emit data without permission"
+        );
+    }
+
+    // Piped-stdin action routing is gated the same way.
+    let result = run(
+        &[],
+        Some(r#"{"action": "portscan", "target": "127.0.0.1", "ports": "1"}"#),
+    );
+    assert_eq!(result.status, 2, "stdin-routed scans must also be gated");
+}
+
+#[test]
+fn portscan_finds_local_listener_with_permission() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let result = run(
+        &[
+            "portscan",
+            "127.0.0.1",
+            "--ports",
+            &port.to_string(),
+            "--timeout-ms",
+            "500",
+            "--yes-i-have-permission",
+        ],
+        None,
+    );
+    assert_eq!(result.status, 0, "stderr: {}", result.stderr);
+    let value = parse(&result);
+    assert_eq!(value["target"], "127.0.0.1");
+    assert_eq!(value["ip"], "127.0.0.1");
+    assert_eq!(value["ports_scanned"], 1);
+    assert_eq!(value["open_count"], 1);
+    assert_eq!(value["open"][0]["port"], port as u64);
+    assert!(value["elapsed_ms"].is_u64());
+}
+
+#[test]
+fn portscan_reports_zero_open_ports_as_data() {
+    let result = run(
+        &[
+            "portscan",
+            "127.0.0.2",
+            "--ports",
+            "1",
+            "--timeout-ms",
+            "500",
+            "--yes-i-have-permission",
+        ],
+        None,
+    );
+    assert_eq!(result.status, 0, "empty scan is data, not an error");
+    let value = parse(&result);
+    assert_eq!(value["open_count"], 0);
+    assert_eq!(value["open"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn device_analyzes_local_listener() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let result = run(
+        &[
+            "device",
+            "127.0.0.1",
+            "--ports",
+            &port.to_string(),
+            "--timeout-ms",
+            "500",
+            "--http-max",
+            "0",
+            "--no-rdns",
+            "--yes-i-have-permission",
+        ],
+        None,
+    );
+    assert_eq!(result.status, 0, "stderr: {}", result.stderr);
+    let value = parse(&result);
+    assert_eq!(value["ip"], "127.0.0.1");
+    assert!(value["open_ports"].as_array().expect("ports").len() >= 1);
+    assert!(value["guess"].is_string());
+    assert!(value["http"].as_array().expect("http probes").is_empty());
+}
+
+#[test]
+fn netscan_discovers_loopback_device() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    let result = run(
+        &[
+            "netscan",
+            "127.0.0.0/30",
+            "--ports",
+            &port.to_string(),
+            "--timeout-ms",
+            "300",
+            "--no-rdns",
+            "--yes-i-have-permission",
+        ],
+        None,
+    );
+    assert_eq!(result.status, 0, "stderr: {}", result.stderr);
+    let value = parse(&result);
+    assert_eq!(value["hosts_total"], 4);
+    assert!(value["devices_found"].as_u64().expect("count") >= 1);
+    let devices = value["devices"].as_array().expect("devices");
+    let hit = devices
+        .iter()
+        .find(|d| d["ip"] == "127.0.0.1")
+        .expect("loopback device must be discovered");
+    assert_eq!(hit["open_ports"][0]["port"], port as u64);
+    assert!(
+        hit["via"].as_array().unwrap().iter().any(|v| v == "tcp"),
+        "tcp discovery path must be reported"
+    );
+}
+
+#[test]
+fn scan_commands_reject_bad_input() {
+    // Invalid CIDR is an error even with permission.
+    let result = run(&["netscan", "not-a-cidr", "--yes-i-have-permission"], None);
+    assert_ne!(result.status, 0);
+    assert!(result.stderr.contains("invalid"));
+
+    // Oversized CIDR is rejected before any packet is sent.
+    let result = run(&["netscan", "10.0.0.0/8", "--yes-i-have-permission"], None);
+    assert_ne!(result.status, 0);
+    assert!(result.stderr.contains("limit"));
+
+    // Bad port spec.
+    let result = run(
+        &["portscan", "127.0.0.1", "--ports", "99999", "--yes-i-have-permission"],
+        None,
+    );
+    assert_ne!(result.status, 0);
+
+    // Invalid IP for device.
+    let result = run(&["device", "not-an-ip", "--yes-i-have-permission"], None);
+    assert_ne!(result.status, 0);
+    assert!(result.stderr.contains("IP"));
 }
