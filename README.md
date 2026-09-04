@@ -63,12 +63,12 @@ Download a prebuilt binary from [Releases](https://github.com/yxpil/Neton/releas
 
 | Platform | File |
 | --- | --- |
-| Linux x86_64 | `neton-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS Apple Silicon | `neton-v0.2.0-aarch64-apple-darwin.tar.gz` |
-| Windows x86_64 | `neton-v0.2.0-x86_64-pc-windows-msvc.zip` |
+| Linux x86_64 | `neton-v0.3.0-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `neton-v0.3.0-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `neton-v0.3.0-x86_64-pc-windows-msvc.zip` |
 
 ```bash
-tar xzf neton-v0.2.0-aarch64-apple-darwin.tar.gz
+tar xzf neton-v0.3.0-aarch64-apple-darwin.tar.gz
 sudo mv neton /usr/local/bin/   # or anywhere on PATH
 neton --version
 ```
@@ -215,7 +215,7 @@ result (HTTP >= 400 is reported to the agent as an error).
 
 ```bash
 curl -s http://127.0.0.1:8753/health
-# {"ok":true}
+# {"ok":true,"service":"neton","version":"0.3.0","actions":11,"mcp":true}
 
 curl -s http://127.0.0.1:8753/invoke-actions
 # {"actions":["info","interfaces","ports","dns","ping","probe","http","arp","netscan","portscan","device"]}
@@ -230,6 +230,21 @@ curl -s -X POST http://127.0.0.1:8753/invoke -H 'Content-Type: application/json'
 # otherwise they answer 403 with an explanation.
 
 # With --token: add  -H 'Authorization: Bearer <token>'  to every call except /health.
+```
+
+### 4. MCP client (since 0.3.0)
+
+`neton serve` is also a full MCP server (Streamable HTTP JSON-RPC, compatible
+with BIT's built-in MCP client, same wire contract as SECFORGE/PANOPTES):
+`initialize` handshake + `Mcp-Session-Id`, `tools/list`, `tools/call` (failures
+return as `isError:true` results, not transport errors), `ping`, protocol
+versions `2024-11-05` / `2025-03-26` / `2025-06-18`. All 11 actions are exposed
+as MCP tools under their action names; scan tools stay listed when locked and
+the refusal names `--yes-i-have-permission`, so the agent can ask to unlock.
+
+```bash
+# add the endpoint on BIT's MCP servers page
+http://127.0.0.1:8753/mcp
 ```
 
 ### Typical agent exchange
@@ -272,9 +287,25 @@ curl -s -X POST http://127.0.0.1:8753/invoke -H 'Content-Type: application/json'
 
 | Endpoint | Method | Description |
 | --- | --- | --- |
-| `/health` | GET | `{"ok":true}` — never token-protected |
+| `/health` | GET | `{"ok":true,"service":"neton","version":"0.3.0","actions":11,"mcp":true}` — never token-protected |
 | `/invoke-actions` | GET | `{"actions":["info","interfaces","ports","dns","ping","probe","http","arp","netscan","portscan","device"]}` |
 | `/invoke` | POST | BIT Remote protocol; `params.action` selects the action, remaining params are its arguments. Unknown action → 400, bad params → 400, unauthorized scan → 403, action failure → 500 |
+| `/` and `/mcp` | POST | MCP JSON-RPC 2.0 (Streamable HTTP) — see below |
+
+### MCP (Model Context Protocol, since 0.3.0)
+
+`neton serve` is also a full MCP server, wire-compatible with BIT's MCP client
+(same contract as SECFORGE/PANOPTES): `initialize` handshake with
+`Mcp-Session-Id`, `tools/list`, `tools/call` (failures come back as
+`isError:true` results, never transport errors), `ping`, protocol versions
+`2024-11-05` / `2025-03-26` / `2025-06-18`. All 11 actions are exposed as MCP
+tools under their action names; the scan tools stay listed when locked and the
+refusal names `--yes-i-have-permission`, so the agent can ask to unlock.
+
+```bash
+# add the endpoint to an MCP client (BIT → MCP servers page)
+http://127.0.0.1:8753/mcp
+```
 
 Action arguments over `/invoke` (same shapes as the CLI results):
 
@@ -362,12 +393,12 @@ neton portscan 192.168.1.1 --yes-i-have-permission
 
 | 平台 | 文件 |
 | --- | --- |
-| Linux x86_64 | `neton-v0.2.0-x86_64-unknown-linux-gnu.tar.gz` |
-| macOS Apple Silicon | `neton-v0.2.0-aarch64-apple-darwin.tar.gz` |
-| Windows x86_64 | `neton-v0.2.0-x86_64-pc-windows-msvc.zip` |
+| Linux x86_64 | `neton-v0.3.0-x86_64-unknown-linux-gnu.tar.gz` |
+| macOS Apple Silicon | `neton-v0.3.0-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `neton-v0.3.0-x86_64-pc-windows-msvc.zip` |
 
 ```bash
-tar xzf neton-v0.2.0-aarch64-apple-darwin.tar.gz
+tar xzf neton-v0.3.0-aarch64-apple-darwin.tar.gz
 sudo mv neton /usr/local/bin/   # 或 PATH 上任意位置
 neton --version
 ```
@@ -472,7 +503,7 @@ BIT 会 POST `{"tool_id": ..., "tool": ..., "invoked_by": ..., "params": {...}}`
 
 ```bash
 curl -s http://127.0.0.1:8753/health
-# {"ok":true}
+# {"ok":true,"service":"neton","version":"0.3.0","actions":11,"mcp":true}
 
 curl -s http://127.0.0.1:8753/invoke-actions
 # {"actions":["info","interfaces","ports","dns","ping","probe","http","arp","netscan","portscan","device"]}
@@ -486,6 +517,19 @@ curl -s -X POST http://127.0.0.1:8753/invoke -H 'Content-Type: application/json'
 # 扫描动作要求服务本身以 --yes-i-have-permission 启动，否则返回 403 并说明原因。
 
 # 启用了 --token 时，除 /health 外每个请求加：-H 'Authorization: Bearer <token>'
+```
+
+**方式四：MCP 客户端（0.3.0 新增）。** `neton serve` 同时是一个完整的 MCP
+服务器（Streamable HTTP JSON-RPC，与 BIT 内置 MCP 客户端兼容，协议契约与
+SECFORGE/PANOPTES 一致）：`initialize` 握手 + `Mcp-Session-Id`、`tools/list`、
+`tools/call`（失败以 `isError:true` 结果返回，而非传输层错误）、`ping`，支持
+`2024-11-05` / `2025-03-26` / `2025-06-18` 三个协议版本。11 个动作以同名 MCP
+工具暴露；扫描工具在锁定时仍会列出，拒绝信息会注明 `--yes-i-have-permission`，
+智能体可据此请求解锁。
+
+```bash
+# 在 BIT → MCP 服务器 页面添加该端点
+http://127.0.0.1:8753/mcp
 ```
 
 **智能体典型问答示例：**
@@ -523,7 +567,7 @@ CLI 与 HTTP API 的完整字段说明见上文 [API](#api) 章节（中英同�
 `SPEC` 端口规格：`common`（40 个常用端口）、列表（`80,443`）或区间（`1-1024`）。
 全局标志：`--json`、`--pretty`、`--yes-i-have-permission`。扫描命令缺少确认标志时以退出码 2 结束。
 
-HTTP 端点：`GET /health`（`{"ok":true}`，不受 token 保护）、`GET /invoke-actions`（动作列表，
+HTTP 端点：`GET /health`（`{"ok":true,…}`，不受 token 保护）、`GET /invoke-actions`（动作列表，
 共 11 个）、`POST /invoke`（BIT Remote 协议：`params.action` 选择动作，其余字段为该动作参数；
 未知 action → 400，参数错误 → 400，未授权扫描 → 403，动作执行失败 → 500）。
 

@@ -450,7 +450,7 @@ fn device_analyzes_local_listener() {
     assert_eq!(result.status, 0, "stderr: {}", result.stderr);
     let value = parse(&result);
     assert_eq!(value["ip"], "127.0.0.1");
-    assert!(value["open_ports"].as_array().expect("ports").len() >= 1);
+    assert!(!value["open_ports"].as_array().expect("ports").is_empty());
     assert!(value["guess"].is_string());
     assert!(value["http"].as_array().expect("http probes").is_empty());
 }
@@ -502,7 +502,13 @@ fn scan_commands_reject_bad_input() {
 
     // Bad port spec.
     let result = run(
-        &["portscan", "127.0.0.1", "--ports", "99999", "--yes-i-have-permission"],
+        &[
+            "portscan",
+            "127.0.0.1",
+            "--ports",
+            "99999",
+            "--yes-i-have-permission",
+        ],
         None,
     );
     assert_ne!(result.status, 0);

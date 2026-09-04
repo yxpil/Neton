@@ -1,9 +1,10 @@
-//! `neton serve` — the BIT Remote protocol over HTTP.
+//! `neton serve` — the BIT Remote protocol plus MCP (Streamable HTTP).
 //!
 //! Endpoints:
-//! - `GET  /health`          → `{"ok":true}` (never token-protected)
+//! - `GET  /health`          → `{"ok":true, …}` (never token-protected)
 //! - `GET  /invoke-actions`  → list of actions callable via `/invoke`
 //! - `POST /invoke`          → BIT Remote protocol (params.action routing)
+//! - `POST /` and `/mcp`     → MCP JSON-RPC 2.0 (tools/list, tools/call, …)
 
 use std::sync::Arc;
 
@@ -19,6 +20,7 @@ use serde_json::{json, Value};
 
 use crate::actions;
 use crate::dispatch::{self, DispatchError};
+use crate::mcp;
 
 /// Default TCP port of `neton serve` (BIT satellite convention).
 pub const DEFAULT_PORT: u16 = 8753;
@@ -31,7 +33,8 @@ struct AppState {
     scan_authorized: bool,
 }
 
-/// Build the HTTP router (exposed for tests and embedding).
+/// Build the HTTP router (exposed for tests and embedding): the BIT Remote
+/// protocol plus the MCP JSON-RPC surface on `/` and `/mcp`.
 pub fn router(token: Option<String>, scan_authorized: bool) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -41,13 +44,19 @@ pub fn router(token: Option<String>, scan_authorized: bool) -> Router {
             token: token.map(Arc::new),
             scan_authorized,
         })
+        .merge(mcp::routes(scan_authorized))
 }
 
 /// Bind `host:port` and serve until the process is stopped.
-pub async fn run(host: &str, port: u16, token: Option<String>, scan_authorized: bool) -> Result<()> {
+pub async fn run(
+    host: &str,
+    port: u16,
+    token: Option<String>,
+    scan_authorized: bool,
+) -> Result<()> {
     let listener = tokio::net::TcpListener::bind((host, port)).await?;
     let addr = listener.local_addr()?;
-    eprintln!("neton serve listening on http://{addr} (GET /health, POST /invoke)");
+    eprintln!("neton serve listening on http://{addr} (GET /health, POST /invoke, POST /mcp MCP)");
     eprintln!(
         "scan actions (netscan/portscan/device): {}",
         if scan_authorized {
@@ -73,8 +82,15 @@ pub fn run_blocking(
     runtime.block_on(run(host, port, token, scan_authorized))
 }
 
-async fn health() -> Json<Value> {
-    Json(json!({ "ok": true }))
+async fn health() -> Response {
+    Json(json!({
+        "ok": true,
+        "service": "neton",
+        "version": env!("CARGO_PKG_VERSION"),
+        "actions": actions::ACTIONS.len(),
+        "mcp": true,
+    }))
+    .into_response()
 }
 
 async fn invoke_actions(State(state): State<AppState>, headers: HeaderMap) -> Response {

@@ -164,10 +164,13 @@ pub fn dispatch_with(
             .map_err(DispatchError::Failure),
         "netscan" => {
             let cidr = get_str("cidr")?.ok_or_else(|| bad("netscan requires 'cidr'"))?;
-            let ports = scan_ports("ports")?
-                .unwrap_or_else(|| crate::scan::DEFAULT_NETSCAN_PORTS.to_vec());
-            let concurrency = get_num("concurrency")?.unwrap_or(crate::scan::DEFAULT_NETSCAN_CONCURRENCY) as usize;
-            let timeout_ms = get_num("timeout_ms")?.unwrap_or(crate::scan::DEFAULT_NETSCAN_TIMEOUT_MS);
+            let ports =
+                scan_ports("ports")?.unwrap_or_else(|| crate::scan::DEFAULT_NETSCAN_PORTS.to_vec());
+            let concurrency = get_num("concurrency")?
+                .unwrap_or(crate::scan::DEFAULT_NETSCAN_CONCURRENCY)
+                as usize;
+            let timeout_ms =
+                get_num("timeout_ms")?.unwrap_or(crate::scan::DEFAULT_NETSCAN_TIMEOUT_MS);
             let rdns = !get_bool("no_rdns")?.unwrap_or(false);
             crate::scan::netscan(&cidr, &ports, concurrency, timeout_ms, rdns)
                 .map(|v| json!(v))
@@ -176,9 +179,11 @@ pub fn dispatch_with(
         "portscan" => {
             let target = get_str("target")?.ok_or_else(|| bad("portscan requires 'target'"))?;
             let ports = scan_ports("ports")?.unwrap_or_else(|| crate::scan::COMMON_PORTS.to_vec());
-            let concurrency =
-                get_num("concurrency")?.unwrap_or(crate::scan::DEFAULT_PORTSCAN_CONCURRENCY) as usize;
-            let timeout_ms = get_num("timeout_ms")?.unwrap_or(crate::scan::DEFAULT_PORTSCAN_TIMEOUT_MS);
+            let concurrency = get_num("concurrency")?
+                .unwrap_or(crate::scan::DEFAULT_PORTSCAN_CONCURRENCY)
+                as usize;
+            let timeout_ms =
+                get_num("timeout_ms")?.unwrap_or(crate::scan::DEFAULT_PORTSCAN_TIMEOUT_MS);
             crate::scan::portscan(&target, &ports, concurrency, timeout_ms)
                 .map(|v| json!(v))
                 .map_err(DispatchError::Failure)
@@ -189,8 +194,10 @@ pub fn dispatch_with(
                 .parse()
                 .map_err(|_| bad("'ip' must be an IPv4 or IPv6 address"))?;
             let ports = scan_ports("ports")?;
-            let timeout_ms = get_num("timeout_ms")?.unwrap_or(crate::device::DEFAULT_DEVICE_TIMEOUT_MS);
-            let http_max = get_num("http_max")?.unwrap_or(crate::device::DEFAULT_HTTP_MAX as u64) as usize;
+            let timeout_ms =
+                get_num("timeout_ms")?.unwrap_or(crate::device::DEFAULT_DEVICE_TIMEOUT_MS);
+            let http_max =
+                get_num("http_max")?.unwrap_or(crate::device::DEFAULT_HTTP_MAX as u64) as usize;
             let rdns = !get_bool("no_rdns")?.unwrap_or(false);
             crate::device::analyze(ip, ports.as_deref(), timeout_ms, http_max, rdns)
                 .map(|v| json!(v))
@@ -301,8 +308,8 @@ mod tests {
 
     #[test]
     fn device_action_requires_valid_ip() {
-        let err = dispatch_with(&json!({ "action": "device", "ip": "not-an-ip" }), true)
-            .unwrap_err();
+        let err =
+            dispatch_with(&json!({ "action": "device", "ip": "not-an-ip" }), true).unwrap_err();
         assert!(matches!(err, DispatchError::BadParams(_)));
     }
 

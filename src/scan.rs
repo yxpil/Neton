@@ -146,7 +146,11 @@ pub fn parse_cidr(input: &str) -> Result<(Ipv4Addr, u8)> {
 /// Mask off host bits to get the network address.
 pub fn normalize_network(addr: Ipv4Addr, prefix: u8) -> Ipv4Addr {
     let raw = u32::from(addr);
-    let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix as u32) };
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix as u32)
+    };
     Ipv4Addr::from(raw & mask)
 }
 
@@ -164,7 +168,9 @@ pub fn cidr_hosts(network: Ipv4Addr, prefix: u8) -> Result<Vec<Ipv4Addr>> {
         );
     }
     let base = u32::from(network);
-    Ok((0..total).map(|i| Ipv4Addr::from(base + i as u32)).collect())
+    Ok((0..total)
+        .map(|i| Ipv4Addr::from(base + i as u32))
+        .collect())
 }
 
 // ------------------------------------------------------------ port specs ----
@@ -322,7 +328,11 @@ pub fn netscan(
             (IpAddr::V4(ip), net, p) => {
                 let raw = u32::from(ip);
                 let base = u32::from(net);
-                let mask = if p == 0 { 0 } else { u32::MAX << (32 - p as u32) };
+                let mask = if p == 0 {
+                    0
+                } else {
+                    u32::MAX << (32 - p as u32)
+                };
                 raw & mask == base & mask
             }
             _ => false,
@@ -348,11 +358,7 @@ pub fn netscan(
         if arp.is_some() {
             via.push("arp".to_string());
         }
-        let hostname = if rdns {
-            rdns_lookup(ip)
-        } else {
-            None
-        };
+        let hostname = if rdns { rdns_lookup(ip) } else { None };
         devices.push(Device {
             ip: *ip,
             mac,
@@ -478,10 +484,7 @@ mod tests {
         assert_eq!(parse_port_spec("80,443,80").unwrap(), vec![80, 443]);
         assert_eq!(parse_port_spec("10-12").unwrap(), vec![10, 11, 12]);
         assert_eq!(parse_port_spec("80,90-92").unwrap(), vec![80, 90, 91, 92]);
-        assert_eq!(
-            parse_port_spec("COMMON").unwrap(),
-            COMMON_PORTS.to_vec()
-        );
+        assert_eq!(parse_port_spec("COMMON").unwrap(), COMMON_PORTS.to_vec());
         assert!(parse_port_spec("").is_err());
         assert!(parse_port_spec("0").is_err());
         assert!(parse_port_spec("5-2").is_err());
@@ -510,7 +513,10 @@ mod tests {
     fn portscan_reports_open_and_sorted_ports() {
         let a = TcpListener::bind("127.0.0.1:0").unwrap();
         let b = TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut ports: Vec<u16> = vec![a.local_addr().unwrap().port(), b.local_addr().unwrap().port()];
+        let mut ports: Vec<u16> = vec![
+            a.local_addr().unwrap().port(),
+            b.local_addr().unwrap().port(),
+        ];
         ports.sort();
         let result = portscan("127.0.0.1", &ports, 2, 500).unwrap();
         assert_eq!(result.open_count, 2);
@@ -545,7 +551,9 @@ mod tests {
     #[test]
     fn permission_gate_blocks_without_ack() {
         let err = ensure_scan_permission("netscan", false).unwrap_err();
-        let gate = err.downcast_ref::<PermissionRequired>().expect("gate error");
+        let gate = err
+            .downcast_ref::<PermissionRequired>()
+            .expect("gate error");
         assert_eq!(gate.action, "netscan");
         ensure_scan_permission("portscan", true).unwrap();
     }

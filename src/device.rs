@@ -24,7 +24,13 @@ pub const DEFAULT_HTTP_MAX: usize = 2;
 
 /// Analyze one device. `ports` defaults to the common preset; `http_max`
 /// bounds the number of HTTP(S) probes issued (max 4).
-pub fn analyze(ip: IpAddr, ports: Option<&[u16]>, timeout_ms: u64, http_max: usize, rdns: bool) -> Result<DeviceReport> {
+pub fn analyze(
+    ip: IpAddr,
+    ports: Option<&[u16]>,
+    timeout_ms: u64,
+    http_max: usize,
+    rdns: bool,
+) -> Result<DeviceReport> {
     let start = Instant::now();
     let ports = ports.unwrap_or(COMMON_PORTS).to_vec();
 
@@ -48,14 +54,15 @@ pub fn analyze(ip: IpAddr, ports: Option<&[u16]>, timeout_ms: u64, http_max: usi
     let open_ports: Vec<u16> = scan.open.iter().map(|p| p.port).collect();
     let mut http_probes: Vec<HttpProbe> = Vec::new();
     let mut probe_budget = http_max.clamp(0, 4);
-    'outer: for port in HTTP_PROBE_PORTS
-        .into_iter()
-        .chain(HTTPS_PROBE_PORTS.into_iter())
-    {
+    'outer: for port in HTTP_PROBE_PORTS.into_iter().chain(HTTPS_PROBE_PORTS) {
         if probe_budget == 0 || !open_ports.contains(&port) {
             continue;
         }
-        let scheme = if HTTPS_PROBE_PORTS.contains(&port) { "https" } else { "http" };
+        let scheme = if HTTPS_PROBE_PORTS.contains(&port) {
+            "https"
+        } else {
+            "http"
+        };
         let url = format!("{scheme}://{ip}:{port}/");
         if let Some(probe) = http_fingerprint(&url, timeout_ms) {
             probe_budget -= 1;
@@ -67,7 +74,11 @@ pub fn analyze(ip: IpAddr, ports: Option<&[u16]>, timeout_ms: u64, http_max: usi
     }
 
     // 5) Best-effort device-type guess from vendor + ports + fingerprints.
-    let guess = guess_device_type(arp_entry.as_ref().and_then(|e| e.vendor.as_deref()), &open_ports, &http_probes);
+    let guess = guess_device_type(
+        arp_entry.as_ref().and_then(|e| e.vendor.as_deref()),
+        &open_ports,
+        &http_probes,
+    );
 
     Ok(DeviceReport {
         ip,
@@ -110,10 +121,7 @@ pub fn http_fingerprint(url: &str, timeout_ms: u64) -> Option<HttpProbe> {
         .or_else(|| response.header("x-generator"))
         .map(str::to_string);
     let mut raw = Vec::new();
-    let _ = response
-        .into_reader()
-        .take(64 * 1024)
-        .read_to_end(&mut raw);
+    let _ = response.into_reader().take(64 * 1024).read_to_end(&mut raw);
     let body = String::from_utf8_lossy(&raw);
     let title = extract_title(&body);
     Some(HttpProbe {
@@ -134,7 +142,10 @@ pub fn extract_title(body: &str) -> Option<String> {
     let gt = lower[open..].find('>')? + open;
     let rest = head.get(gt + 1..)?;
     let close = rest.to_ascii_lowercase().find("</title")?;
-    let title: String = rest[..close].split_whitespace().collect::<Vec<_>>().join(" ");
+    let title: String = rest[..close]
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     (!title.is_empty()).then_some(title)
 }
 
@@ -253,17 +264,13 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         // Hold the listener for the duration of the analysis.
-        let report = analyze(
-            IpAddr::from([127, 0, 0, 1]),
-            Some(&[port]),
-            500,
-            0,
-            false,
-        )
-        .unwrap();
+        let report = analyze(IpAddr::from([127, 0, 0, 1]), Some(&[port]), 500, 0, false).unwrap();
         drop(listener);
         assert_eq!(report.ip.to_string(), "127.0.0.1");
         assert_eq!(report.open_ports[0].port, port);
-        assert_eq!(report.open_ports[0].service, service_name(port).map(str::to_string));
+        assert_eq!(
+            report.open_ports[0].service,
+            service_name(port).map(str::to_string)
+        );
     }
 }

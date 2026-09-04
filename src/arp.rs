@@ -95,10 +95,15 @@ pub fn parse_arp_macos(output: &str) -> Vec<RawEntry> {
             let rest = rest.strip_prefix(" at ")?;
             if rest.starts_with("(incomplete)") {
                 let interface = rest.split(" on ").nth(1)?.split_whitespace().next();
-                return Some((ip, None, interface.map(str::to_string), Some("incomplete".into())));
+                return Some((
+                    ip,
+                    None,
+                    interface.map(str::to_string),
+                    Some("incomplete".into()),
+                ));
             }
             let mut parts = rest.splitn(3, " on ");
-            let mac = parts.next()?.trim().split_whitespace().next()?.to_string();
+            let mac = parts.next()?.split_whitespace().next()?.to_string();
             let tail = parts.next().unwrap_or("");
             let interface = tail.split_whitespace().next().map(str::to_string);
             Some((ip, Some(mac), interface, None))
@@ -121,7 +126,9 @@ pub fn parse_ip_neigh(output: &str) -> Vec<RawEntry> {
                 match token {
                     "dev" => interface = tokens.next().map(str::to_string),
                     "lladdr" => mac = tokens.next().map(str::to_string),
-                    other if other.chars().all(|c| c.is_ascii_uppercase()) => state = Some(other.into()),
+                    other if other.chars().all(|c| c.is_ascii_uppercase()) => {
+                        state = Some(other.into())
+                    }
                     _ => {}
                 }
             }
@@ -143,10 +150,15 @@ pub fn parse_arp_linux_arp(output: &str) -> Vec<RawEntry> {
             let rest = rest.strip_prefix(" at ")?;
             if rest.starts_with("<incomplete>") {
                 let interface = rest.split(" on ").nth(1)?.split_whitespace().next();
-                return Some((ip, None, interface.map(str::to_string), Some("incomplete".into())));
+                return Some((
+                    ip,
+                    None,
+                    interface.map(str::to_string),
+                    Some("incomplete".into()),
+                ));
             }
             let mut parts = rest.splitn(2, " on ");
-            let mac = parts.next()?.trim().split_whitespace().next()?.to_string();
+            let mac = parts.next()?.split_whitespace().next()?.to_string();
             let interface = parts.next().map(|tail| {
                 tail.split_whitespace()
                     .next()
@@ -251,21 +263,22 @@ mod tests {
 
     #[test]
     fn normalizes_and_attaches_vendor() {
-        let entries: Vec<ArpEntry> = parse_ip_neigh("192.168.1.1 dev wlan0 lladdr A4-2B-8C-11-22-33 REACHABLE\n")
-            .into_iter()
-            .filter_map(|(ip, mac, interface, state)| {
-                let ip: IpAddr = ip.parse().ok()?;
-                let mac = mac.map(|m| normalize_mac(&m));
-                let vendor = mac.as_deref().and_then(vendor_for_mac).map(str::to_string);
-                Some(ArpEntry {
-                    ip,
-                    mac,
-                    vendor,
-                    interface,
-                    state,
+        let entries: Vec<ArpEntry> =
+            parse_ip_neigh("192.168.1.1 dev wlan0 lladdr A4-2B-8C-11-22-33 REACHABLE\n")
+                .into_iter()
+                .filter_map(|(ip, mac, interface, state)| {
+                    let ip: IpAddr = ip.parse().ok()?;
+                    let mac = mac.map(|m| normalize_mac(&m));
+                    let vendor = mac.as_deref().and_then(vendor_for_mac).map(str::to_string);
+                    Some(ArpEntry {
+                        ip,
+                        mac,
+                        vendor,
+                        interface,
+                        state,
+                    })
                 })
-            })
-            .collect();
+                .collect();
         assert_eq!(entries[0].mac.as_deref(), Some("a4:2b:8c:11:22:33"));
         assert_eq!(entries[0].vendor.as_deref(), Some("TP-Link"));
     }
@@ -273,10 +286,7 @@ mod tests {
     #[test]
     fn normalize_mac_pads_dropped_leading_zeros() {
         // macOS `arp -an` prints randomized MACs without leading zeros.
-        assert_eq!(
-            normalize_mac("da:6b:7:66:d1:c"),
-            "da:6b:07:66:d1:0c"
-        );
+        assert_eq!(normalize_mac("da:6b:7:66:d1:c"), "da:6b:07:66:d1:0c");
         assert_eq!(normalize_mac("A4-2B-8C-11-22-33"), "a4:2b:8c:11:22:33");
         assert_eq!(normalize_mac("a42b8c112233"), "a4:2b:8c:11:22:33");
     }

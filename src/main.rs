@@ -152,8 +152,13 @@ fn run() -> Result<Option<String>> {
             }
             scan::ensure_scan_permission("netscan", scan_allowed)?;
             let cidr = require(&args.cidr, "cidr", "netscan")?.to_string();
-            let ports = parse_ports_or_default(args.ports.as_deref(), scan::DEFAULT_NETSCAN_PORTS.to_vec())?;
-            let concurrency = args.concurrency.unwrap_or(scan::DEFAULT_NETSCAN_CONCURRENCY as usize);
+            let ports = parse_ports_or_default(
+                args.ports.as_deref(),
+                scan::DEFAULT_NETSCAN_PORTS.to_vec(),
+            )?;
+            let concurrency = args
+                .concurrency
+                .unwrap_or(scan::DEFAULT_NETSCAN_CONCURRENCY as usize);
             let timeout_ms = args.timeout_ms.unwrap_or(scan::DEFAULT_NETSCAN_TIMEOUT_MS);
             emit(
                 &scan::netscan(&cidr, &ports, concurrency, timeout_ms, !args.no_rdns)?,
@@ -171,7 +176,10 @@ fn run() -> Result<Option<String>> {
                 .concurrency
                 .unwrap_or(scan::DEFAULT_PORTSCAN_CONCURRENCY as usize);
             let timeout_ms = args.timeout_ms.unwrap_or(scan::DEFAULT_PORTSCAN_TIMEOUT_MS);
-            emit(&scan::portscan(&target, &ports, concurrency, timeout_ms)?, cli.pretty)
+            emit(
+                &scan::portscan(&target, &ports, concurrency, timeout_ms)?,
+                cli.pretty,
+            )
         }
         Some(Command::Device(mut args)) => {
             if let Some(value) = &stdin {
@@ -185,7 +193,9 @@ fn run() -> Result<Option<String>> {
                 Some(spec) => Some(scan::parse_port_spec(spec)?),
                 None => None,
             };
-            let timeout_ms = args.timeout_ms.unwrap_or(neton::device::DEFAULT_DEVICE_TIMEOUT_MS);
+            let timeout_ms = args
+                .timeout_ms
+                .unwrap_or(neton::device::DEFAULT_DEVICE_TIMEOUT_MS);
             let http_max = args.http_max.unwrap_or(neton::device::DEFAULT_HTTP_MAX);
             emit(
                 &neton::device::analyze(ip, ports.as_deref(), timeout_ms, http_max, !args.no_rdns)?,
@@ -193,15 +203,13 @@ fn run() -> Result<Option<String>> {
             )
         }
         None => match stdin {
-            Some(value) => {
-                match dispatch::dispatch_with(&value, scan_allowed) {
-                    Ok(out) => emit(&out, cli.pretty),
-                    Err(dispatch::DispatchError::PermissionRequired(action)) => Err(anyhow::Error::new(
-                        scan::PermissionRequired { action },
-                    )),
-                    Err(err) => Err(anyhow::anyhow!("{err}")),
+            Some(value) => match dispatch::dispatch_with(&value, scan_allowed) {
+                Ok(out) => emit(&out, cli.pretty),
+                Err(dispatch::DispatchError::PermissionRequired(action)) => {
+                    Err(anyhow::Error::new(scan::PermissionRequired { action }))
                 }
-            }
+                Err(err) => Err(anyhow::anyhow!("{err}")),
+            },
             None => {
                 Cli::command()
                     .print_help()

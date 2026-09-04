@@ -50,7 +50,7 @@ fn decode_name(packet: &[u8], pos: usize) -> Option<(String, usize)> {
                 pos = end;
             }
             0xC0 => {
-                let offset = (((len & 0x3F) as usize) << 8) | (*packet.get(pos + 1)? as usize);
+                let offset = ((len & 0x3F) << 8) | (*packet.get(pos + 1)? as usize);
                 if !jumped {
                     next = pos + 2;
                     jumped = true;
@@ -107,7 +107,12 @@ pub fn resolve_ptr(ip: &IpAddr, server: IpAddr, timeout: Duration) -> Option<Str
     let query_name = ptr_name(&v4);
     let query = build_query(&query_name);
 
-    let socket = UdpSocket::bind(if server.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }).ok()?;
+    let socket = UdpSocket::bind(if server.is_ipv4() {
+        "0.0.0.0:0"
+    } else {
+        "[::]:0"
+    })
+    .ok()?;
     socket.set_read_timeout(Some(timeout)).ok()?;
     socket.set_write_timeout(Some(timeout)).ok()?;
     let target = std::net::SocketAddr::new(server, 53);
@@ -152,7 +157,7 @@ mod tests {
         packet.extend_from_slice(&12u16.to_be_bytes());
         packet.extend_from_slice(&1u16.to_be_bytes());
         packet.extend_from_slice(&[0, 0, 0, 60]); // TTL
-        // RDATA: my-router.local (2 labels)
+                                                  // RDATA: my-router.local (2 labels)
         packet.extend_from_slice(&[0, 15]);
         packet.extend_from_slice(b"\x09my-router\x05local\x00");
         let name = parse_response(&packet).expect("parsed name");
@@ -167,6 +172,13 @@ mod tests {
 
     #[test]
     fn ipv6_is_out_of_scope() {
-        assert_eq!(resolve_ptr(&"::1".parse().unwrap(), "127.0.0.1".parse().unwrap(), Duration::from_millis(50)), None);
+        assert_eq!(
+            resolve_ptr(
+                &"::1".parse().unwrap(),
+                "127.0.0.1".parse().unwrap(),
+                Duration::from_millis(50)
+            ),
+            None
+        );
     }
 }
