@@ -1,0 +1,30 @@
+[package]
+name = "neton"
+version = "0.1.0"
+edition = "2021"
+description = "Structured local network observation and diagnostics for AI agents (JSON in, JSON out)"
+license = "Apache-2.0"
+repository = "https://github.com/yxpil/Neton"
+readme = "README.md"
+keywords = ["network", "diagnostics", "agent", "cli", "json"]
+categories = ["command-line-utilities", "network-programming"]
+
+[lib]
+name = "neton"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neton"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+if-addrs = "0.13"
+netstat2 = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.33"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+ureq = { version = "2", features = ["json"] }
