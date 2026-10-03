@@ -1,3 +1,11 @@
+# Neton 测试说明
+- 测试完成：是（2026-10-04）
+- 测试日期：2026-10-04
+- 测试内容：单元覆盖 models/oui/scan(端口·CIDR 解析)/dispatch 参数校验/arp/dns_ptr 纯函数；集成覆盖 cli 二进制、serve(axum `/invoke`)、mcp(JSON-RPC)；注入测试覆盖参数解析器与 bearer 门（XSS 与 shell 串作为 host 被当数据返回、路径穿越/端口越界被解析拒绝、JSON 类型混淆 400、SQL 式 token 绕过 401）。无运行时钩子/插件/事件机制。
+- 运行命令：`cargo test`（仓库根）
+- 测试框架：Rust `#[cfg(test)]` + `cargo test`（集成测试位于 `tests/`）
+- 模型：豆包（Doubao）生成
+
 # Testing Neton
 
 Neton is a structured local-network observation tool (JSON in, JSON out). It has
