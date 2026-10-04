@@ -608,3 +608,15 @@ Part of the [BIT](https://github.com/yxpil/bit) ecosystem — a desktop AI agent
 satellite tools. Neton observes the network; [Firelin](https://github.com/yxpil/Firelin) attacks it.
 
 Licensed under [Apache-2.0](./LICENSE).
+
+---
+
+<div align="center">
+
+<a href="https://github.com/yxpil/Neton">
+  <img width="100%" src="https://alittlecatgirlpanel.yxp.hk/card?repo=yxpil/Neton" alt="gh-card · yxpil/Neton" />
+</a>
+
+<sub>Powered by <a href="https://alittlecatgirlpanel.yxp.hk"><b>gh-card</b></a> · 粉色手写体 README 仓库名片</sub>
+
+</div>
